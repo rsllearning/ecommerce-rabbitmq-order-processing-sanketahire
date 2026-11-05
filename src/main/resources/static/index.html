@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E-Commerce Order Processing | RabbitMQ Event-Driven Architecture</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        code, pre { font-family: 'JetBrains Mono', monospace; }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen py-10 px-4 sm:px-6 lg:px-8">
+
+    <div class="max-w-5xl mx-auto space-y-8">
+        
+        <!-- Header -->
+        <header class="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-6 sm:p-8 shadow-xl backdrop-blur">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                    <div class="flex items-center gap-3">
+                        <span class="inline-flex items-center justify-center p-2 bg-orange-500/10 text-orange-400 rounded-xl border border-orange-500/20">
+                            <!-- RabbitMQ Icon -->
+                            <svg class="w-8 h-8" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+                            </svg>
+                        </span>
+                        <div>
+                            <h1 class="text-2xl sm:text-3xl font-bold tracking-tight text-white">E-Commerce Order Processing</h1>
+                            <p class="text-sm text-slate-400 mt-0.5">Asynchronous Event-Driven Architecture with RabbitMQ Topic Exchange</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Architecture Badges -->
+                <div class="flex flex-wrap gap-2 text-xs">
+                    <span class="px-3 py-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-full font-medium">Topic: orders_exchange</span>
+                    <span class="px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full font-medium">DLX: orders_dlx</span>
+                    <span class="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full font-medium">Prefetch QoS = 1</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            
+            <!-- Left: Order Form & Test Controls -->
+            <div class="lg:col-span-5 space-y-6">
+                
+                <!-- Order Form Card -->
+                <div class="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-6 shadow-xl space-y-5">
+                    <div class="flex items-center justify-between pb-3 border-b border-slate-700/60">
+                        <h2 class="text-lg font-semibold text-white flex items-center gap-2">
+                            <span>🛒</span> Place New Order
+                        </h2>
+                        <span class="text-xs text-slate-400 font-mono">POST /api/orders</span>
+                    </div>
+
+                    <form id="orderForm" class="space-y-4">
+                        <!-- Category Selection -->
+                        <div>
+                            <label for="category" class="block text-sm font-medium text-slate-300 mb-1.5">
+                                Item Category <span class="text-red-400">*</span>
+                            </label>
+                            <select id="category" name="category" class="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent text-sm">
+                                <option value="electronics">Electronics (Routes to Inventory + Analytics)</option>
+                                <option value="clothing">Clothing (Routes to Inventory Only)</option>
+                                <option value="books">Books (Routes to Inventory Only)</option>
+                                <option value="home">Home Goods (Routes to Inventory Only)</option>
+                            </select>
+                            <p class="text-xs text-slate-400 mt-1">Routing key generated: <code class="text-orange-400 font-semibold" id="previewRoutingKey">order.created.electronics</code></p>
+                        </div>
+
+                        <!-- Quantity Input -->
+                        <div>
+                            <label for="quantity" class="block text-sm font-medium text-slate-300 mb-1.5">
+                                Order Quantity <span class="text-red-400">*</span>
+                            </label>
+                            <input type="number" id="quantity" name="quantity" value="2" class="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent text-sm" placeholder="Enter quantity">
+                            <p class="text-xs text-amber-400/90 mt-1 flex items-center gap-1">
+                                <span>⚠️</span> Enter a negative quantity (e.g. -1, -5) to test DLX rejection!
+                            </p>
+                        </div>
+
+                        <!-- Custom Order ID (Optional for Idempotency test) -->
+                        <div>
+                            <label for="customOrderId" class="block text-xs font-medium text-slate-400 mb-1">
+                                Custom Order ID (Optional - for Idempotency Test)
+                            </label>
+                            <input type="text" id="customOrderId" name="customOrderId" class="w-full bg-slate-900/60 border border-slate-700/60 rounded-xl px-3 py-1.5 text-slate-300 focus:outline-none focus:ring-1 focus:ring-orange-500 text-xs font-mono" placeholder="Auto-generated UUID if left blank">
+                        </div>
+
+                        <!-- Submit Button -->
+                        <button type="submit" id="submitBtn" class="w-full bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-medium py-2.5 px-4 rounded-xl shadow-lg shadow-orange-500/20 transition-all duration-200 flex items-center justify-center gap-2 text-sm">
+                            <span id="btnSpinner" class="hidden animate-spin">⏳</span>
+                            <span id="btnText">Place Order (Fire & Forget)</span>
+                        </button>
+                    </form>
+                </div>
+
+                <!-- 1-Click Verification Presets -->
+                <div class="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-5 shadow-xl space-y-3">
+                    <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Assignment Quick-Test Presets</h3>
+                    <div class="grid grid-cols-1 gap-2">
+                        <button onclick="applyPreset('electronics', 2)" class="w-full text-left px-3 py-2 rounded-lg bg-slate-900/70 hover:bg-slate-700/50 border border-slate-700/50 text-xs flex items-center justify-between group transition">
+                            <div>
+                                <span class="font-medium text-blue-400">1. Electronics Order (Qty: 2)</span>
+                                <p class="text-[11px] text-slate-400">Dual routing: Inventory + Analytics match</p>
+                            </div>
+                            <span class="text-slate-500 group-hover:text-slate-300">Run ➔</span>
+                        </button>
+
+                        <button onclick="applyPreset('clothing', 5)" class="w-full text-left px-3 py-2 rounded-lg bg-slate-900/70 hover:bg-slate-700/50 border border-slate-700/50 text-xs flex items-center justify-between group transition">
+                            <div>
+                                <span class="font-medium text-emerald-400">2. Clothing Order (Qty: 5)</span>
+                                <p class="text-[11px] text-slate-400">Single routing: Inventory only; Analytics ignores</p>
+                            </div>
+                            <span class="text-slate-500 group-hover:text-slate-300">Run ➔</span>
+                        </button>
+
+                        <button onclick="applyPreset('electronics', -3)" class="w-full text-left px-3 py-2 rounded-lg bg-slate-900/70 hover:bg-slate-700/50 border border-slate-700/50 text-xs flex items-center justify-between group transition">
+                            <div>
+                                <span class="font-medium text-red-400">3. Invalid Order (Qty: -3)</span>
+                                <p class="text-[11px] text-slate-400">Inventory rejects with requeue=false ➔ routes to DLX</p>
+                            </div>
+                            <span class="text-slate-500 group-hover:text-slate-300">Run ➔</span>
+                        </button>
+
+                        <button onclick="applyDuplicatePreset()" class="w-full text-left px-3 py-2 rounded-lg bg-slate-900/70 hover:bg-slate-700/50 border border-slate-700/50 text-xs flex items-center justify-between group transition">
+                            <div>
+                                <span class="font-medium text-purple-400">4. Duplicate Order (Idempotency)</span>
+                                <p class="text-[11px] text-slate-400">Sends fixed order_id twice to verify deduplication</p>
+                            </div>
+                            <span class="text-slate-500 group-hover:text-slate-300">Run ➔</span>
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Right: Real-time Response & Routing Visualizer -->
+            <div class="lg:col-span-7 space-y-6">
+                
+                <!-- Live Response Card -->
+                <div class="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-6 shadow-xl space-y-4">
+                    <div class="flex items-center justify-between pb-3 border-b border-slate-700/60">
+                        <div class="flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                            <h2 class="text-lg font-semibold text-white">Live Publisher Output</h2>
+                        </div>
+                        <span id="responseStatusBadge" class="hidden px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            HTTP 202 ACCEPTED
+                        </span>
+                    </div>
+
+                    <div id="emptyState" class="py-12 text-center text-slate-500">
+                        <p class="text-sm">No orders published yet.</p>
+                        <p class="text-xs text-slate-600 mt-1">Submit the order form or click a preset to see the live AMQP event.</p>
+                    </div>
+
+                    <div id="responseDetails" class="hidden space-y-4">
+                        <div class="bg-slate-900/80 border border-slate-700/70 rounded-xl p-4 space-y-2.5">
+                            <div class="flex justify-between items-center text-xs">
+                                <span class="text-slate-400">Assigned Order ID:</span>
+                                <code id="resOrderId" class="text-orange-400 font-mono font-medium"></code>
+                            </div>
+                            <div class="flex justify-between items-center text-xs">
+                                <span class="text-slate-400">Topic Routing Key:</span>
+                                <code id="resRoutingKey" class="text-blue-400 font-mono font-medium"></code>
+                            </div>
+                            <div class="flex justify-between items-center text-xs">
+                                <span class="text-slate-400">Target Exchange:</span>
+                                <code class="text-slate-300 font-mono font-medium">orders_exchange</code>
+                            </div>
+                            <div class="flex justify-between items-center text-xs">
+                                <span class="text-slate-400">Response Latency:</span>
+                                <span id="resLatency" class="text-emerald-400 font-semibold font-mono"></span>
+                            </div>
+                        </div>
+
+                        <!-- Routing Expectation Explainer -->
+                        <div class="bg-slate-900/50 border border-slate-700/40 rounded-xl p-4">
+                            <h4 class="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Subscriber Routing Analysis:</h4>
+                            <ul id="routingExplanation" class="text-xs space-y-1.5 text-slate-400">
+                                <!-- Dynamic explanation populated via JS -->
+                            </ul>
+                        </div>
+
+                        <!-- Raw JSON Payload -->
+                        <div>
+                            <span class="text-xs font-medium text-slate-400 mb-1 block">Raw Server Response:</span>
+                            <pre id="rawJsonResponse" class="bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-300 overflow-x-auto"></pre>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Activity History -->
+                <div class="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-6 shadow-xl space-y-3">
+                    <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Order History (Session)</h3>
+                    <div id="historyList" class="space-y-2 max-h-56 overflow-y-auto pr-1">
+                        <p class="text-xs text-slate-500 italic">No events recorded in this session yet.</p>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const categorySelect = document.getElementById('category');
+        const previewRoutingKey = document.getElementById('previewRoutingKey');
+        const orderForm = document.getElementById('orderForm');
+        const quantityInput = document.getElementById('quantity');
+        const customOrderIdInput = document.getElementById('customOrderId');
+
+        const emptyState = document.getElementById('emptyState');
+        const responseDetails = document.getElementById('responseDetails');
+        const responseStatusBadge = document.getElementById('responseStatusBadge');
+        const resOrderId = document.getElementById('resOrderId');
+        const resRoutingKey = document.getElementById('resRoutingKey');
+        const resLatency = document.getElementById('resLatency');
+        const routingExplanation = document.getElementById('routingExplanation');
+        const rawJsonResponse = document.getElementById('rawJsonResponse');
+        const historyList = document.getElementById('historyList');
+
+        categorySelect.addEventListener('change', () => {
+            previewRoutingKey.textContent = `order.created.${categorySelect.value.toLowerCase().trim()}`;
+        });
+
+        function applyPreset(cat, qty) {
+            categorySelect.value = cat;
+            quantityInput.value = qty;
+            customOrderIdInput.value = '';
+            previewRoutingKey.textContent = `order.created.${cat}`;
+            orderForm.dispatchEvent(new Event('submit'));
+        }
+
+        function applyDuplicatePreset() {
+            categorySelect.value = 'electronics';
+            quantityInput.value = 1;
+            customOrderIdInput.value = 'duplicate-order-test-001';
+            previewRoutingKey.textContent = 'order.created.electronics';
+            orderForm.dispatchEvent(new Event('submit'));
+        }
+
+        orderForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const category = categorySelect.value;
+            const quantity = parseInt(quantityInput.value, 10);
+            const customOrderId = customOrderIdInput.value.trim();
+
+            const payload = { category, quantity };
+            const headers = { 'Content-Type': 'application/json' };
+            if (customOrderId) {
+                headers['X-Order-Id'] = customOrderId;
+            }
+
+            const startTime = performance.now();
+
+            try {
+                const response = await fetch('/api/orders', {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify(payload)
+                });
+
+                const latency = Math.round(performance.now() - startTime);
+                const data = await response.json();
+
+                // Display response
+                emptyState.classList.add('hidden');
+                responseDetails.classList.remove('hidden');
+                responseStatusBadge.classList.remove('hidden');
+
+                resOrderId.textContent = data.orderId;
+                resRoutingKey.textContent = data.routingKey;
+                resLatency.textContent = `${latency} ms (Instant 202)`;
+                rawJsonResponse.textContent = JSON.stringify(data, null, 2);
+
+                // Populate explanation
+                let expHtml = '';
+                if (quantity < 0) {
+                    expHtml += `<li class="flex items-center gap-2 text-red-400">❌ <strong>Inventory Service:</strong> Receives event (order.created.*), detects invalid quantity (${quantity}), explicitly REJECTS with requeue=false ➔ routes to DLX.</li>`;
+                    expHtml += `<li class="flex items-center gap-2 text-amber-400">⚠️ <strong>DLX Error Logger:</strong> Consumes from dead_letter_queue and logs invalid order.</li>`;
+                    if (category === 'electronics') {
+                        expHtml += `<li class="flex items-center gap-2 text-blue-400">📊 <strong>Analytics Service:</strong> Also receives event because key matches 'order.created.electronics'.</li>`;
+                    }
+                } else if (category === 'electronics') {
+                    expHtml += `<li class="flex items-center gap-2 text-emerald-400">✅ <strong>Inventory Service:</strong> Matches 'order.created.*' wildcard ➔ reserves inventory & ACKs.</li>`;
+                    expHtml += `<li class="flex items-center gap-2 text-blue-400">✅ <strong>Analytics Service:</strong> Matches exact 'order.created.electronics' ➔ logs high-value sale & ACKs.</li>`;
+                } else {
+                    expHtml += `<li class="flex items-center gap-2 text-emerald-400">✅ <strong>Inventory Service:</strong> Matches 'order.created.*' wildcard ➔ reserves inventory & ACKs.</li>`;
+                    expHtml += `<li class="flex items-center gap-2 text-slate-500">⚪ <strong>Analytics Service:</strong> Ignored (does not match '${category}').</li>`;
+                }
+                routingExplanation.innerHTML = expHtml;
+
+                // Add to history
+                addHistoryItem(data.orderId, category, quantity, data.routingKey, latency);
+
+            } catch (err) {
+                alert('Error placing order: ' + err.message);
+            }
+        });
+
+        function addHistoryItem(orderId, category, quantity, routingKey, latency) {
+            if (historyList.querySelector('p.italic')) {
+                historyList.innerHTML = '';
+            }
+            const item = document.createElement('div');
+            item.className = 'p-2.5 bg-slate-900/60 border border-slate-700/50 rounded-lg flex items-center justify-between text-xs font-mono';
+            item.innerHTML = `
+                <div>
+                    <span class="text-orange-400 font-semibold">${orderId.substring(0, 8)}...</span>
+                    <span class="text-slate-400 ml-2">${category} (Qty: ${quantity})</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="text-blue-400">${routingKey}</span>
+                    <span class="text-emerald-400">${latency}ms</span>
+                </div>
+            `;
+            historyList.prepend(item);
+        }
+    </script>
+</body>
+</html>
